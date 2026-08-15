@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+.env
+*.pyc
+*.pyo
+*.pyd
+*.log
+.cache/
+data/
+
+
+
+# allow our document
+!data/
+!data/notes.pdf
