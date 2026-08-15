@@ -4,14 +4,20 @@ langchain==0.1.16
 langchain-core==0.1.52
 langchain-community==0.0.34
 
-langchain-pinecone
-langchain-huggingface
-langchain-groq
+langchain-pinecone==0.1.2
+langchain-huggingface==0.0.3
+langchain-groq==0.1.5
 
 pinecone-client==3.2.2
 
-sentence-transformers
+sentence-transformers==5.7.0
 huggingface-hub
+
+transformers
+tokenizers
+torch
+scikit-learn
+scipy
 
 pypdf==4.2.0
 python-dotenv==1.0.1
