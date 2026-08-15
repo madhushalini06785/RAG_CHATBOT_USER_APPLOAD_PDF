@@ -49,17 +49,20 @@ if "chats" not in st.session_state:
 
         chat_id: {
 
-            "title": "New Chat",
+            "title":
+                "New Chat",
 
-            "messages": [],
+            "messages":
+                [],
 
-            "namespace": (
-                "chat-" + chat_id
-            ),
+            "namespace":
+                "chat-" + chat_id,
 
-            "files": [],
+            "files":
+                [],
 
-            "rag_chain": None
+            "rag_chain":
+                None
         }
     }
 
@@ -78,22 +81,27 @@ def create_new_chat():
         uuid.uuid4()
     )
 
+
     st.session_state.chats[
         chat_id
     ] = {
 
-        "title": "New Chat",
+        "title":
+            "New Chat",
 
-        "messages": [],
+        "messages":
+            [],
 
-        "namespace": (
-            "chat-" + chat_id
-        ),
+        "namespace":
+            "chat-" + chat_id,
 
-        "files": [],
+        "files":
+            [],
 
-        "rag_chain": None
+        "rag_chain":
+            None
     }
+
 
     st.session_state.current_chat = (
         chat_id
@@ -107,6 +115,7 @@ def create_new_chat():
 current_chat_id = (
     st.session_state.current_chat
 )
+
 
 current_chat = (
     st.session_state.chats[
@@ -126,9 +135,9 @@ with st.sidebar:
     st.divider()
 
 
-    # --------------------------------------------------
+    # ==================================================
     # NEW CHAT
-    # --------------------------------------------------
+    # ==================================================
 
     if st.button(
         "➕ New Chat",
@@ -143,17 +152,23 @@ with st.sidebar:
     st.divider()
 
 
-    # --------------------------------------------------
+    # ==================================================
     # CHAT HISTORY
-    # --------------------------------------------------
+    # ==================================================
 
-    st.subheader("💬 Chats")
+    st.subheader(
+        "💬 Chats"
+    )
+
 
     for chat_id, chat in (
         st.session_state.chats.items()
     ):
 
-        title = chat["title"]
+        title = chat[
+            "title"
+        ]
+
 
         if chat_id == current_chat_id:
 
@@ -184,16 +199,23 @@ with st.sidebar:
     st.divider()
 
 
-    # --------------------------------------------------
+    # ==================================================
     # DOCUMENTS
-    # --------------------------------------------------
+    # ==================================================
 
-    st.subheader("📄 Documents")
+    st.subheader(
+        "📄 Documents"
+    )
 
-    if current_chat["files"]:
+
+    if current_chat[
+        "files"
+    ]:
 
         for file_info in (
-            current_chat["files"]
+            current_chat[
+                "files"
+            ]
         ):
 
             st.caption(
@@ -210,16 +232,18 @@ with st.sidebar:
     st.divider()
 
 
-    # --------------------------------------------------
-    # CLEAR CHAT
-    # --------------------------------------------------
+    # ==================================================
+    # CLEAR CURRENT CHAT
+    # ==================================================
 
     if st.button(
         "🗑️ Clear Current Chat",
         use_container_width=True
     ):
 
-        current_chat["messages"] = []
+        current_chat[
+            "messages"
+        ] = []
 
         st.rerun()
 
@@ -228,7 +252,10 @@ with st.sidebar:
 # MAIN PAGE
 # ==================================================
 
-st.title("📚 AI Document Assistant")
+st.title(
+    "📚 AI Document Assistant"
+)
+
 
 st.write(
     "Upload one or more PDFs and ask questions about them."
@@ -253,16 +280,28 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
 
+    # --------------------------------------------------
+    # Identify already processed files
+    # --------------------------------------------------
+
     processed_files = {
+
         (
             file_info["name"],
             file_info["size"]
         )
-        for file_info in current_chat[
-            "files"
-        ]
+
+        for file_info in (
+            current_chat[
+                "files"
+            ]
+        )
     }
 
+
+    # --------------------------------------------------
+    # Find new files
+    # --------------------------------------------------
 
     new_files = [
 
@@ -277,15 +316,21 @@ if uploaded_files:
     ]
 
 
+    # --------------------------------------------------
+    # Process files
+    # --------------------------------------------------
+
     if new_files:
 
         st.subheader(
             "📚 Processing Documents"
         )
 
-        overall_progress = st.progress(
-            0
+
+        overall_progress = (
+            st.progress(0)
         )
+
 
         status_text = st.empty()
 
@@ -307,9 +352,9 @@ if uploaded_files:
             )
 
 
-            # ----------------------------------------------
-            # Temporary file
-            # ----------------------------------------------
+            # ==================================================
+            # SAVE TEMPORARY PDF
+            # ==================================================
 
             with tempfile.NamedTemporaryFile(
                 delete=False,
@@ -327,25 +372,28 @@ if uploaded_files:
 
             try:
 
-                # ------------------------------------------
-                # Progress callback
-                # ------------------------------------------
+                # ==================================================
+                # PROGRESS CALLBACK
+                # ==================================================
 
                 def update_progress(
                     progress,
                     message
                 ):
 
-                    # Progress of current file
                     current_file_progress = (
+
                         (
                             file_number - 1
                         )
                         / total_files
+
                     ) + (
+
                         progress
                         / total_files
                     )
+
 
                     overall_progress.progress(
                         min(
@@ -353,6 +401,7 @@ if uploaded_files:
                             1.0
                         )
                     )
+
 
                     status_text.write(
                         f"📄 "
@@ -363,9 +412,9 @@ if uploaded_files:
                     )
 
 
-                # ------------------------------------------
-                # Ingest
-                # ------------------------------------------
+                # ==================================================
+                # INGEST PDF
+                # ==================================================
 
                 pages, chunks = ingest_pdf(
 
@@ -385,9 +434,9 @@ if uploaded_files:
                 )
 
 
-                # ------------------------------------------
-                # Save file information
-                # ------------------------------------------
+                # ==================================================
+                # SAVE FILE INFORMATION
+                # ==================================================
 
                 current_chat[
                     "files"
@@ -412,6 +461,10 @@ if uploaded_files:
 
             finally:
 
+                # ==================================================
+                # DELETE TEMP FILE
+                # ==================================================
+
                 if os.path.exists(
                     temp_path
                 ):
@@ -421,9 +474,9 @@ if uploaded_files:
                     )
 
 
-        # --------------------------------------------------
-        # Create RAG chain
-        # --------------------------------------------------
+        # ==================================================
+        # CREATE RAG CHAIN
+        # ==================================================
 
         current_chat[
             "rag_chain"
@@ -443,13 +496,14 @@ if uploaded_files:
             1.0
         )
 
+
         status_text.success(
             "🎉 All documents processed successfully!"
         )
 
 
 # ==================================================
-# CHAT HISTORY
+# DISPLAY CHAT HISTORY
 # ==================================================
 
 for message in current_chat[
@@ -476,11 +530,13 @@ user_prompt = st.chat_input(
 
 if user_prompt:
 
-    # --------------------------------------------------
-    # Check PDFs
-    # --------------------------------------------------
+    # ==================================================
+    # CHECK DOCUMENTS
+    # ==================================================
 
-    if not current_chat["files"]:
+    if not current_chat[
+        "files"
+    ]:
 
         st.warning(
             "Please upload at least one PDF first."
@@ -489,9 +545,9 @@ if user_prompt:
         st.stop()
 
 
-    # --------------------------------------------------
-    # Make sure RAG chain exists
-    # --------------------------------------------------
+    # ==================================================
+    # CREATE RAG CHAIN IF REQUIRED
+    # ==================================================
 
     if current_chat[
         "rag_chain"
@@ -511,15 +567,16 @@ if user_prompt:
         )
 
 
-    # --------------------------------------------------
-    # Generate chat title
-    # --------------------------------------------------
+    # ==================================================
+    # CREATE CHAT TITLE
+    # ==================================================
 
     if current_chat[
         "title"
     ] == "New Chat":
 
         title = user_prompt.strip()
+
 
         if len(title) > 30:
 
@@ -528,14 +585,33 @@ if user_prompt:
                 + "..."
             )
 
+
         current_chat[
             "title"
         ] = title
 
 
-    # --------------------------------------------------
-    # Display user message
-    # --------------------------------------------------
+    # ==================================================
+    # BUILD PREVIOUS CHAT HISTORY
+    # ==================================================
+
+    chat_history = ""
+
+
+    for message in current_chat[
+        "messages"
+    ]:
+
+        chat_history += (
+
+            f'{message["role"]}: '
+            f'{message["content"]}\n'
+        )
+
+
+    # ==================================================
+    # DISPLAY USER MESSAGE
+    # ==================================================
 
     with st.chat_message(
         "user"
@@ -546,60 +622,64 @@ if user_prompt:
         )
 
 
+    # ==================================================
+    # SAVE USER MESSAGE
+    # ==================================================
+
     current_chat[
         "messages"
     ].append(
 
         {
-            "role": "user",
+            "role":
+                "user",
 
-            "content": user_prompt
+            "content":
+                user_prompt
         }
     )
 
 
-    # --------------------------------------------------
-    # Generate answer
-    # --------------------------------------------------
+    # ==================================================
+    # GENERATE ANSWER
+    # ==================================================
 
-    with st.chat_message("assistant"):
+    with st.chat_message(
+        "assistant"
+    ):
 
-        with st.spinner("Thinking... 🤖"):
+        with st.spinner(
+            "Thinking... 🤖"
+        ):
 
-            # Build conversation history
-            chat_history = ""
-
-            for message in current_chat["messages"]:
-
-                chat_history += (
-                    f'{message["role"]}: '
-                    f'{message["content"]}\n'
-                )
-
-
-            # Ask RAG chain
             response, sources = (
-                current_chat["rag_chain"](
+
+                current_chat[
+                    "rag_chain"
+                ](
+
                     user_prompt,
+
                     chat_history
                 )
             )
 
 
-        st.markdown(response)
+        st.markdown(
+            response
+        )
 
 
-    
-
-        # --------------------------------------------------
-        # Sources
-        # --------------------------------------------------
+        # ==================================================
+        # DISPLAY SOURCES
+        # ==================================================
 
         if sources:
 
             st.markdown(
                 "### 📖 Sources"
             )
+
 
             for source in sources:
 
@@ -608,17 +688,19 @@ if user_prompt:
                 )
 
 
-    # --------------------------------------------------
-    # Save response
-    # --------------------------------------------------
+    # ==================================================
+    # SAVE ASSISTANT RESPONSE
+    # ==================================================
 
     current_chat[
         "messages"
     ].append(
 
         {
-            "role": "assistant",
+            "role":
+                "assistant",
 
-            "content": response
+            "content":
+                response
         }
     )
