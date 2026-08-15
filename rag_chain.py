@@ -210,8 +210,11 @@ def get_rag_chain(
     # ==================================================
 
     vectorstore = PineconeVectorStore(
+
         index=index,
+
         embedding=embedding,
+
         namespace=namespace
     )
 
@@ -231,7 +234,7 @@ def get_rag_chain(
 
 
     # ==================================================
-    # GROQ
+    # GROQ LLM
     # ==================================================
 
     llm = ChatGroq(
@@ -245,13 +248,14 @@ def get_rag_chain(
 
 
     # ==================================================
-    # CREATE CHAINS ONCE
+    # CREATE CHAINS
     # ==================================================
 
     rewrite_chain = (
         rewrite_prompt
         | llm
     )
+
 
     answer_chain = (
         answer_prompt
@@ -274,7 +278,7 @@ def get_rag_chain(
 
 
         # ==================================================
-        # STEP 1 — REWRITE
+        # STEP 1 — REWRITE QUESTION
         # ==================================================
 
         rewrite_result = rewrite_chain.invoke({
@@ -293,7 +297,7 @@ def get_rag_chain(
 
 
         # ==================================================
-        # STEP 2 — RETRIEVE
+        # STEP 2 — RETRIEVE DOCUMENTS
         # ==================================================
 
         docs = retriever.invoke(
@@ -302,7 +306,7 @@ def get_rag_chain(
 
 
         # ==================================================
-        # STEP 3 — CONTEXT
+        # STEP 3 — CREATE CONTEXT
         # ==================================================
 
         context = "\n\n".join(
@@ -314,7 +318,7 @@ def get_rag_chain(
 
 
         # ==================================================
-        # STEP 4 — ANSWER
+        # STEP 4 — GENERATE ANSWER
         # ==================================================
 
         answer_result = answer_chain.invoke({
@@ -334,7 +338,7 @@ def get_rag_chain(
 
 
         # ==================================================
-        # STEP 5 — SOURCES
+        # STEP 5 — EXTRACT SOURCES
         # ==================================================
 
         sources = []
@@ -354,6 +358,10 @@ def get_rag_chain(
                 None
             )
 
+
+            # ==================================================
+            # CONVERT PAGE NUMBER
+            # ==================================================
 
             if isinstance(page, int):
 
@@ -377,9 +385,14 @@ def get_rag_chain(
                     page_number = None
 
 
+            # ==================================================
+            # CREATE SOURCE TEXT
+            # ==================================================
+
             if page_number is not None:
 
                 source_text = (
+
                     f"📄 {source} — "
                     f"Page {page_number}"
                 )
@@ -387,9 +400,14 @@ def get_rag_chain(
             else:
 
                 source_text = (
+
                     f"📄 {source}"
                 )
 
+
+            # ==================================================
+            # REMOVE DUPLICATE SOURCES
+            # ==================================================
 
             if source_text not in seen:
 
@@ -402,7 +420,15 @@ def get_rag_chain(
                 )
 
 
+        # ==================================================
+        # RETURN RESULT
+        # ==================================================
+
         return answer, sources
 
+
+    # ==================================================
+    # RETURN ASK FUNCTION
+    # ==================================================
 
     return ask
