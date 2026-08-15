@@ -13,3 +13,10 @@ data/
 # allow our document
 !data/
 !data/notes.pdf
+
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+.streamlit/secrets.toml
