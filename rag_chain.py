@@ -8,7 +8,6 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 
 from langchain.prompts import ChatPromptTemplate
-from langchain.chains import RetrievalQA
 
 
 # ==================================================
@@ -17,9 +16,7 @@ from langchain.chains import RetrievalQA
 
 load_dotenv()
 
-GROQ_API_KEY = os.getenv(
-    "GROQ_API_KEY"
-)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 # ==================================================
@@ -42,12 +39,14 @@ using the uploaded documents.
 Rules:
 
 1. Use only the provided document context.
-2. Do not use outside knowledge.
+2. Do NOT use outside knowledge.
 3. If the answer cannot be found in the documents, say:
 "I could not find the answer in the uploaded documents."
 4. Understand follow-up questions using the conversation history.
 5. Give detailed answers when the user asks for more detail.
 6. Do not invent information.
+7. If the user asks a follow-up question, use the previous
+   conversation to understand what they are referring to.
 
 Conversation History:
 {chat_history}
@@ -58,8 +57,9 @@ Context from Documents:
 Question:
 {question}
 
-Answer:
+Answer clearly and accurately:
 """
+
 
 answer_prompt = ChatPromptTemplate.from_template(
     answer_template
@@ -74,18 +74,20 @@ rewrite_template = """
 You are a question-rewriting assistant for a document
 question-answering system.
 
-Your job is to convert the user's latest question into
+Your task is to convert the user's latest question into
 a standalone question that can be understood without
 the previous conversation.
 
-Use the conversation history to understand references
-such as:
+Use the conversation history to understand references such as:
 
 - it
 - this
 - that
 - these
 - those
+- its
+- they
+- them
 - explain more
 - give me in depth
 - tell me more
@@ -95,6 +97,8 @@ such as:
 - advantages
 - disadvantages
 - applications
+- explain the first one
+- explain the above
 
 Examples:
 
@@ -132,6 +136,17 @@ Give examples of applications of computer vision.
 ---
 
 Conversation:
+User: What is object detection?
+Assistant: ...
+
+User: What are its advantages?
+
+Standalone question:
+What are the advantages of object detection?
+
+---
+
+Conversation:
 {chat_history}
 
 Latest user question:
@@ -140,6 +155,7 @@ Latest user question:
 Return ONLY the rewritten standalone question.
 Do not answer the question.
 """
+
 
 rewrite_prompt = ChatPromptTemplate.from_template(
     rewrite_template
@@ -157,7 +173,7 @@ def get_rag_chain(
 ):
 
     # ==================================================
-    # PINECONE
+    # CONNECT TO PINECONE
     # ==================================================
 
     pc = Pinecone(
@@ -213,7 +229,6 @@ def get_rag_chain(
     ):
 
         if chat_history is None:
-
             chat_history = ""
 
 
@@ -226,23 +241,18 @@ def get_rag_chain(
             | llm
         )
 
-
         rewrite_result = (
             rewrite_chain.invoke(
                 {
-                    "chat_history":
-                        chat_history,
-
-                    "question":
-                        query
+                    "chat_history": chat_history,
+                    "question": query
                 }
             )
         )
 
 
         standalone_question = (
-            rewrite_result.content
-            .strip()
+            rewrite_result.content.strip()
         )
 
 
@@ -260,9 +270,7 @@ def get_rag_chain(
         # ==================================================
 
         context = "\n\n".join(
-
             doc.page_content
-
             for doc in docs
         )
 
@@ -276,34 +284,25 @@ def get_rag_chain(
             | llm
         )
 
-
         answer_result = (
             answer_chain.invoke(
                 {
-                    "chat_history":
-                        chat_history,
-
-                    "context":
-                        context,
-
-                    "question":
-                        standalone_question
+                    "chat_history": chat_history,
+                    "context": context,
+                    "question": standalone_question
                 }
             )
         )
 
 
-        answer = (
-            answer_result.content
-        )
+        answer = answer_result.content
 
 
         # ==================================================
-        # STEP 5: SOURCES
+        # STEP 5: EXTRACT SOURCES
         # ==================================================
 
         sources = []
-
         seen = set()
 
 
@@ -320,29 +319,30 @@ def get_rag_chain(
             )
 
 
-            if isinstance(
-                page,
-                int
-            ):
+            # ----------------------------------------------
+            # Convert page to integer
+            # ----------------------------------------------
 
-                page_number = (
-                    page + 1
-                )
+            if isinstance(page, int):
+
+                page_number = page + 1
 
             else:
 
                 try:
 
-                    page_number = (
-                        int(page) + 1
-                    )
+                    page_number = int(page) + 1
 
-                except:
+                except (TypeError, ValueError):
 
                     page_number = None
 
 
-            if page_number:
+            # ----------------------------------------------
+            # Create source text
+            # ----------------------------------------------
+
+            if page_number is not None:
 
                 source_text = (
                     f"📄 {source} — "
@@ -356,6 +356,10 @@ def get_rag_chain(
                 )
 
 
+            # ----------------------------------------------
+            # Avoid duplicate sources
+            # ----------------------------------------------
+
             if source_text not in seen:
 
                 sources.append(
@@ -367,10 +371,7 @@ def get_rag_chain(
                 )
 
 
-        return (
-            answer,
-            sources
-        )
+        return answer, sources
 
 
     return ask
