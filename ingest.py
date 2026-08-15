@@ -35,7 +35,7 @@ def ingest_pdf(
 ):
 
     # ==================================================
-    # LOAD EMBEDDING MODEL
+    # LOAD CACHED EMBEDDING MODEL
     # ==================================================
 
     embedding_model = get_embedding_model()
@@ -108,6 +108,10 @@ def ingest_pdf(
     total_chunks = len(splits)
 
 
+    # ==================================================
+    # CHECK CHUNKS
+    # ==================================================
+
     if total_chunks == 0:
 
         raise ValueError(
@@ -128,6 +132,10 @@ def ingest_pdf(
             f.read()
         ).hexdigest()[:12]
 
+
+    # ==================================================
+    # ORIGINAL FILE NAME
+    # ==================================================
 
     filename = os.path.basename(
         pdf_path
@@ -154,28 +162,48 @@ def ingest_pdf(
             total_chunks
         )
 
+
+        # --------------------------------------------------
+        # GET CURRENT BATCH
+        # --------------------------------------------------
+
+        batch_documents = splits[
+            start:end
+        ]
+
+
         batch_texts = [
 
             doc.page_content
 
-            for doc in splits[start:end]
+            for doc in batch_documents
         ]
 
 
+        # --------------------------------------------------
+        # CREATE EMBEDDINGS
+        # --------------------------------------------------
+
         batch_embeddings = (
+
             embedding_model.embed_documents(
                 batch_texts
             )
         )
 
 
-        for local_index, emb in enumerate(
+        # --------------------------------------------------
+        # CREATE PINECONE VECTORS
+        # --------------------------------------------------
+
+        for local_index, embedding in enumerate(
             batch_embeddings
         ):
 
             global_index = (
                 start + local_index
             )
+
 
             doc = splits[
                 global_index
@@ -204,20 +232,21 @@ def ingest_pdf(
                     f"{file_hash}-chunk-{global_index}",
 
                 "values":
-                    emb,
+                    embedding,
 
                 "metadata":
                     metadata
             })
 
 
-        # ----------------------------------------------
-        # PROGRESS
-        # ----------------------------------------------
+        # --------------------------------------------------
+        # UPDATE EMBEDDING PROGRESS
+        # --------------------------------------------------
 
         embedding_progress = (
             end / total_chunks
         )
+
 
         progress = (
             0.20 +
@@ -228,7 +257,9 @@ def ingest_pdf(
         if progress_callback:
 
             progress_callback(
+
                 progress,
+
                 (
                     f"🧠 Creating embeddings: "
                     f"{end}/{total_chunks} chunks"
@@ -237,7 +268,7 @@ def ingest_pdf(
 
 
     # ==================================================
-    # UPLOAD TO PINECONE
+    # UPLOAD VECTORS TO PINECONE
     # ==================================================
 
     pinecone_batch_size = 100
@@ -258,10 +289,15 @@ def ingest_pdf(
             total_vectors
         )
 
+
         batch = vectors[
             start:end
         ]
 
+
+        # --------------------------------------------------
+        # UPSERT
+        # --------------------------------------------------
 
         index.upsert(
             vectors=batch,
@@ -269,9 +305,14 @@ def ingest_pdf(
         )
 
 
+        # --------------------------------------------------
+        # UPDATE UPLOAD PROGRESS
+        # --------------------------------------------------
+
         upload_progress = (
             end / total_vectors
         )
+
 
         progress = (
             0.75 +
@@ -282,7 +323,9 @@ def ingest_pdf(
         if progress_callback:
 
             progress_callback(
+
                 progress,
+
                 (
                     f"☁️ Uploading to Pinecone: "
                     f"{end}/{total_vectors}"
@@ -297,11 +340,21 @@ def ingest_pdf(
     if progress_callback:
 
         progress_callback(
+
             1.0,
+
             (
-                f"✅ {filename} processed successfully"
+                f"✅ {filename} "
+                f"processed successfully"
             )
         )
 
 
-    return pages, total_chunks
+    # ==================================================
+    # RETURN INFORMATION
+    # ==================================================
+
+    return (
+        pages,
+        total_chunks
+    )
