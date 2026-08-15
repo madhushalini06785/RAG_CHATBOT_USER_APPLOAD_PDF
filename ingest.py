@@ -4,21 +4,22 @@ import hashlib
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
+
 from pinecone import Pinecone
 
 
-# --------------------------------------------------
+# ==================================================
 # LOAD EMBEDDING MODEL ONCE
-# --------------------------------------------------
+# ==================================================
 
 embedding_model = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
 
-# --------------------------------------------------
+# ==================================================
 # INGEST PDF
-# --------------------------------------------------
+# ==================================================
 
 def ingest_pdf(
     pdf_path,
@@ -28,9 +29,9 @@ def ingest_pdf(
     progress_callback=None
 ):
 
-    # --------------------------------------------------
-    # 1. Connect to Pinecone
-    # --------------------------------------------------
+    # ==================================================
+    # CONNECT TO PINECONE
+    # ==================================================
 
     pc = Pinecone(
         api_key=pinecone_api_key
@@ -41,9 +42,9 @@ def ingest_pdf(
     )
 
 
-    # --------------------------------------------------
-    # 2. Check PDF
-    # --------------------------------------------------
+    # ==================================================
+    # CHECK FILE
+    # ==================================================
 
     if not os.path.exists(pdf_path):
 
@@ -52,15 +53,17 @@ def ingest_pdf(
         )
 
 
-    # --------------------------------------------------
-    # 3. Load PDF
-    # --------------------------------------------------
+    # ==================================================
+    # READ PDF
+    # ==================================================
 
     if progress_callback:
+
         progress_callback(
             0.05,
             "📖 Reading PDF..."
         )
+
 
     loader = PyPDFLoader(
         pdf_path
@@ -71,15 +74,17 @@ def ingest_pdf(
     pages = len(documents)
 
 
-    # --------------------------------------------------
-    # 4. Split PDF
-    # --------------------------------------------------
+    # ==================================================
+    # SPLIT DOCUMENT
+    # ==================================================
 
     if progress_callback:
+
         progress_callback(
             0.15,
             f"✂️ Splitting {pages} pages..."
         )
+
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,
@@ -93,9 +98,16 @@ def ingest_pdf(
     total_chunks = len(splits)
 
 
-    # --------------------------------------------------
-    # 5. Prepare text
-    # --------------------------------------------------
+    if total_chunks == 0:
+
+        raise ValueError(
+            "No readable text was found in the PDF."
+        )
+
+
+    # ==================================================
+    # PREPARE TEXT
+    # ==================================================
 
     texts = [
         doc.page_content
@@ -103,43 +115,59 @@ def ingest_pdf(
     ]
 
 
-    # --------------------------------------------------
-    # 6. File name
-    # --------------------------------------------------
+    # ==================================================
+    # GET ORIGINAL FILE NAME
+    # ==================================================
 
     filename = os.path.basename(
         pdf_path
     )
 
-    file_hash = hashlib.sha256(
-        filename.encode()
-    ).hexdigest()[:10]
+
+    # ==================================================
+    # CREATE HASH FROM ACTUAL PDF CONTENT
+    # ==================================================
+
+    with open(
+        pdf_path,
+        "rb"
+    ) as f:
+
+        file_hash = hashlib.sha256(
+            f.read()
+        ).hexdigest()[:12]
 
 
-    # --------------------------------------------------
-    # 7. Generate embeddings in batches
-    # --------------------------------------------------
+    # ==================================================
+    # GENERATE EMBEDDINGS
+    # ==================================================
 
-    batch_size = 64
+    embedding_batch_size = 64
 
     vectors = []
+
 
     for start in range(
         0,
         total_chunks,
-        batch_size
+        embedding_batch_size
     ):
 
         end = min(
-            start + batch_size,
+            start + embedding_batch_size,
             total_chunks
         )
+
 
         batch_texts = texts[
             start:end
         ]
 
+
+        # ----------------------------------------------
         # Generate embeddings
+        # ----------------------------------------------
+
         batch_embeddings = (
             embedding_model.embed_documents(
                 batch_texts
@@ -147,7 +175,10 @@ def ingest_pdf(
         )
 
 
-        # Create vectors
+        # ----------------------------------------------
+        # Create Pinecone vectors
+        # ----------------------------------------------
+
         for local_index, emb in enumerate(
             batch_embeddings
         ):
@@ -160,42 +191,53 @@ def ingest_pdf(
                 global_index
             ]
 
+
             metadata = {
 
-                "text": doc.page_content,
+                "text":
+                    doc.page_content,
 
-                "page": doc.metadata.get(
-                    "page",
-                    "unknown"
-                ),
+                "page":
+                    doc.metadata.get(
+                        "page",
+                        "unknown"
+                    ),
 
-                "source": filename
+                "source":
+                    filename
             }
 
 
             vectors.append(
                 {
-                    "id": (
+
+                    "id":
                         f"{file_hash}-"
-                        f"chunk-{global_index}"
-                    ),
+                        f"chunk-{global_index}",
 
-                    "values": emb,
+                    "values":
+                        emb,
 
-                    "metadata": metadata
+                    "metadata":
+                        metadata
                 }
             )
 
 
-        # Progress: 20% → 75%
+        # ----------------------------------------------
+        # Update progress
+        # ----------------------------------------------
+
         embedding_progress = (
             end / total_chunks
         )
+
 
         progress = (
             0.20 +
             embedding_progress * 0.55
         )
+
 
         if progress_callback:
 
@@ -208,15 +250,16 @@ def ingest_pdf(
             )
 
 
-    # --------------------------------------------------
-    # 8. Upload to Pinecone in batches
-    # --------------------------------------------------
+    # ==================================================
+    # UPLOAD TO PINECONE
+    # ==================================================
 
     pinecone_batch_size = 100
 
     total_vectors = len(
         vectors
     )
+
 
     for start in range(
         0,
@@ -229,9 +272,11 @@ def ingest_pdf(
             total_vectors
         )
 
+
         batch = vectors[
             start:end
         ]
+
 
         index.upsert(
             vectors=batch,
@@ -239,14 +284,20 @@ def ingest_pdf(
         )
 
 
+        # ----------------------------------------------
+        # Update upload progress
+        # ----------------------------------------------
+
         upload_progress = (
             end / total_vectors
         )
+
 
         progress = (
             0.75 +
             upload_progress * 0.20
         )
+
 
         if progress_callback:
 
@@ -259,9 +310,9 @@ def ingest_pdf(
             )
 
 
-    # --------------------------------------------------
-    # 9. Complete
-    # --------------------------------------------------
+    # ==================================================
+    # COMPLETE
+    # ==================================================
 
     if progress_callback:
 
