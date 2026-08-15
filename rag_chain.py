@@ -1,5 +1,7 @@
 import os
 
+import streamlit as st
+
 from dotenv import load_dotenv
 from pinecone import Pinecone
 
@@ -16,16 +18,21 @@ from langchain.prompts import ChatPromptTemplate
 
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = os.getenv(
+    "GROQ_API_KEY"
+)
 
 
 # ==================================================
 # EMBEDDING MODEL
 # ==================================================
 
-embedding = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
+@st.cache_resource
+def get_embedding_model():
+
+    return HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
 
 
 # ==================================================
@@ -33,8 +40,9 @@ embedding = HuggingFaceEmbeddings(
 # ==================================================
 
 answer_template = """
-You are an AI assistant that answers questions strictly
-using the uploaded documents.
+
+You are an AI assistant that answers questions
+strictly using the uploaded documents.
 
 Rules:
 
@@ -45,16 +53,19 @@ Rules:
 4. Understand follow-up questions using the conversation history.
 5. Give detailed answers when the user asks for more detail.
 6. Do not invent information.
-7. If the user asks a follow-up question, use the previous
+7. If the user asks a follow-up question, use previous
    conversation to understand what they are referring to.
 
 Conversation History:
+
 {chat_history}
 
 Context from Documents:
+
 {context}
 
 Question:
+
 {question}
 
 Answer clearly and accurately:
@@ -71,14 +82,15 @@ answer_prompt = ChatPromptTemplate.from_template(
 # ==================================================
 
 rewrite_template = """
-You are a question-rewriting assistant for a document
-question-answering system.
 
-Your task is to convert the user's latest question into
-a standalone question that can be understood without
-the previous conversation.
+You are a question-rewriting assistant for a
+document question-answering system.
 
-Use the conversation history to understand references such as:
+Your task is to convert the user's latest question
+into a standalone question.
+
+Use the conversation history to understand references
+such as:
 
 - it
 - this
@@ -100,59 +112,60 @@ Use the conversation history to understand references such as:
 - explain the first one
 - explain the above
 
-Examples:
+Example:
 
 Conversation:
+
 User: What is computer vision?
+
 Assistant: Computer vision is a field...
 
 User: Give me in depth.
 
 Standalone question:
+
 Give an in-depth explanation of computer vision.
 
 ---
 
 Conversation:
+
 User: What are CNNs?
+
 Assistant: CNNs are...
 
 User: Explain its architecture.
 
 Standalone question:
+
 Explain the architecture of CNNs.
 
 ---
 
 Conversation:
-User: What are applications of computer vision?
-Assistant: ...
 
-User: Give examples.
-
-Standalone question:
-Give examples of applications of computer vision.
-
----
-
-Conversation:
 User: What is object detection?
+
 Assistant: ...
 
 User: What are its advantages?
 
 Standalone question:
+
 What are the advantages of object detection?
 
 ---
 
 Conversation:
+
 {chat_history}
 
 Latest user question:
+
 {question}
 
 Return ONLY the rewritten standalone question.
+
 Do not answer the question.
 """
 
@@ -173,7 +186,14 @@ def get_rag_chain(
 ):
 
     # ==================================================
-    # CONNECT TO PINECONE
+    # EMBEDDINGS
+    # ==================================================
+
+    embedding = get_embedding_model()
+
+
+    # ==================================================
+    # PINECONE
     # ==================================================
 
     pc = Pinecone(
@@ -201,7 +221,9 @@ def get_rag_chain(
     # ==================================================
 
     retriever = vectorstore.as_retriever(
+
         search_type="similarity",
+
         search_kwargs={
             "k": 5
         }
@@ -209,13 +231,31 @@ def get_rag_chain(
 
 
     # ==================================================
-    # GROQ LLM
+    # GROQ
     # ==================================================
 
     llm = ChatGroq(
+
         groq_api_key=GROQ_API_KEY,
+
         model_name="openai/gpt-oss-20b",
+
         temperature=0
+    )
+
+
+    # ==================================================
+    # CREATE CHAINS ONCE
+    # ==================================================
+
+    rewrite_chain = (
+        rewrite_prompt
+        | llm
+    )
+
+    answer_chain = (
+        answer_prompt
+        | llm
     )
 
 
@@ -229,26 +269,22 @@ def get_rag_chain(
     ):
 
         if chat_history is None:
+
             chat_history = ""
 
 
         # ==================================================
-        # STEP 1: REWRITE QUESTION
+        # STEP 1 — REWRITE
         # ==================================================
 
-        rewrite_chain = (
-            rewrite_prompt
-            | llm
-        )
+        rewrite_result = rewrite_chain.invoke({
 
-        rewrite_result = (
-            rewrite_chain.invoke(
-                {
-                    "chat_history": chat_history,
-                    "question": query
-                }
-            )
-        )
+            "chat_history":
+                chat_history,
+
+            "question":
+                query
+        })
 
 
         standalone_question = (
@@ -257,7 +293,7 @@ def get_rag_chain(
 
 
         # ==================================================
-        # STEP 2: RETRIEVE DOCUMENTS
+        # STEP 2 — RETRIEVE
         # ==================================================
 
         docs = retriever.invoke(
@@ -266,43 +302,43 @@ def get_rag_chain(
 
 
         # ==================================================
-        # STEP 3: CREATE CONTEXT
+        # STEP 3 — CONTEXT
         # ==================================================
 
         context = "\n\n".join(
+
             doc.page_content
+
             for doc in docs
         )
 
 
         # ==================================================
-        # STEP 4: GENERATE ANSWER
+        # STEP 4 — ANSWER
         # ==================================================
 
-        answer_chain = (
-            answer_prompt
-            | llm
-        )
+        answer_result = answer_chain.invoke({
 
-        answer_result = (
-            answer_chain.invoke(
-                {
-                    "chat_history": chat_history,
-                    "context": context,
-                    "question": standalone_question
-                }
-            )
-        )
+            "chat_history":
+                chat_history,
+
+            "context":
+                context,
+
+            "question":
+                standalone_question
+        })
 
 
         answer = answer_result.content
 
 
         # ==================================================
-        # STEP 5: EXTRACT SOURCES
+        # STEP 5 — SOURCES
         # ==================================================
 
         sources = []
+
         seen = set()
 
 
@@ -319,28 +355,27 @@ def get_rag_chain(
             )
 
 
-            # ----------------------------------------------
-            # Convert page to integer
-            # ----------------------------------------------
-
             if isinstance(page, int):
 
-                page_number = page + 1
+                page_number = (
+                    page + 1
+                )
 
             else:
 
                 try:
 
-                    page_number = int(page) + 1
+                    page_number = (
+                        int(page) + 1
+                    )
 
-                except (TypeError, ValueError):
+                except (
+                    TypeError,
+                    ValueError
+                ):
 
                     page_number = None
 
-
-            # ----------------------------------------------
-            # Create source text
-            # ----------------------------------------------
 
             if page_number is not None:
 
@@ -355,10 +390,6 @@ def get_rag_chain(
                     f"📄 {source}"
                 )
 
-
-            # ----------------------------------------------
-            # Avoid duplicate sources
-            # ----------------------------------------------
 
             if source_text not in seen:
 
