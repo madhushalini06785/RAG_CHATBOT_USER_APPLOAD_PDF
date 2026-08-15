@@ -1,4 +1,5 @@
 import os
+import hashlib
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -7,21 +8,29 @@ from pinecone import Pinecone
 
 
 # --------------------------------------------------
-# INGEST UPLOADED PDF
+# LOAD EMBEDDING MODEL ONCE
+# --------------------------------------------------
+
+embedding_model = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
+
+
+# --------------------------------------------------
+# INGEST PDF
 # --------------------------------------------------
 
 def ingest_pdf(
     pdf_path,
     pinecone_api_key,
     pinecone_index,
-    namespace
+    namespace,
+    progress_callback=None
 ):
 
     # --------------------------------------------------
     # 1. Connect to Pinecone
     # --------------------------------------------------
-
-    print("Connecting to Pinecone...")
 
     pc = Pinecone(
         api_key=pinecone_api_key
@@ -33,33 +42,47 @@ def ingest_pdf(
 
 
     # --------------------------------------------------
-    # 2. Load PDF
+    # 2. Check PDF
     # --------------------------------------------------
 
-    print("Loading PDF...")
-
     if not os.path.exists(pdf_path):
+
         raise FileNotFoundError(
-            "Uploaded PDF could not be found."
+            "PDF file not found."
         )
 
-    loader = PyPDFLoader(pdf_path)
+
+    # --------------------------------------------------
+    # 3. Load PDF
+    # --------------------------------------------------
+
+    if progress_callback:
+        progress_callback(
+            0.05,
+            "📖 Reading PDF..."
+        )
+
+    loader = PyPDFLoader(
+        pdf_path
+    )
 
     documents = loader.load()
 
-    print(
-        f"PDF loaded successfully: {len(documents)} pages"
-    )
+    pages = len(documents)
 
 
     # --------------------------------------------------
-    # 3. Split PDF into chunks
+    # 4. Split PDF
     # --------------------------------------------------
 
-    print("Splitting document...")
+    if progress_callback:
+        progress_callback(
+            0.15,
+            f"✂️ Splitting {pages} pages..."
+        )
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
+        chunk_size=800,
         chunk_overlap=100
     )
 
@@ -67,82 +90,188 @@ def ingest_pdf(
         documents
     )
 
-    print(
-        f"Created {len(splits)} chunks"
-    )
+    total_chunks = len(splits)
 
 
     # --------------------------------------------------
-    # 4. Create embeddings
+    # 5. Prepare text
     # --------------------------------------------------
-
-    print("Creating embeddings...")
-
-    embedding_model = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
 
     texts = [
         doc.page_content
         for doc in splits
     ]
 
-    embeddings = embedding_model.embed_documents(
-        texts
+
+    # --------------------------------------------------
+    # 6. File name
+    # --------------------------------------------------
+
+    filename = os.path.basename(
+        pdf_path
     )
 
+    file_hash = hashlib.sha256(
+        filename.encode()
+    ).hexdigest()[:10]
+
 
     # --------------------------------------------------
-    # 5. Prepare vectors
+    # 7. Generate embeddings in batches
     # --------------------------------------------------
 
-    print("Preparing vectors...")
+    batch_size = 64
 
     vectors = []
 
-    for i, (doc, emb) in enumerate(
-        zip(splits, embeddings)
+    for start in range(
+        0,
+        total_chunks,
+        batch_size
     ):
 
-        metadata = {
-            "text": doc.page_content,
-            "page": doc.metadata.get(
-                "page",
-                "unknown"
-            ),
-            "source": os.path.basename(
-                pdf_path
-            )
-        }
+        end = min(
+            start + batch_size,
+            total_chunks
+        )
 
-        vectors.append(
-            {
-                "id": f"{namespace}-chunk-{i}",
-                "values": emb,
-                "metadata": metadata
-            }
+        batch_texts = texts[
+            start:end
+        ]
+
+        # Generate embeddings
+        batch_embeddings = (
+            embedding_model.embed_documents(
+                batch_texts
+            )
         )
 
 
+        # Create vectors
+        for local_index, emb in enumerate(
+            batch_embeddings
+        ):
+
+            global_index = (
+                start + local_index
+            )
+
+            doc = splits[
+                global_index
+            ]
+
+            metadata = {
+
+                "text": doc.page_content,
+
+                "page": doc.metadata.get(
+                    "page",
+                    "unknown"
+                ),
+
+                "source": filename
+            }
+
+
+            vectors.append(
+                {
+                    "id": (
+                        f"{file_hash}-"
+                        f"chunk-{global_index}"
+                    ),
+
+                    "values": emb,
+
+                    "metadata": metadata
+                }
+            )
+
+
+        # Progress: 20% → 75%
+        embedding_progress = (
+            end / total_chunks
+        )
+
+        progress = (
+            0.20 +
+            embedding_progress * 0.55
+        )
+
+        if progress_callback:
+
+            progress_callback(
+                progress,
+                (
+                    f"🧠 Creating embeddings: "
+                    f"{end}/{total_chunks} chunks"
+                )
+            )
+
+
     # --------------------------------------------------
-    # 6. Upload vectors to Pinecone
+    # 8. Upload to Pinecone in batches
     # --------------------------------------------------
 
-    print("Uploading vectors to Pinecone...")
+    pinecone_batch_size = 100
 
-    index.upsert(
-        vectors=vectors,
-        namespace=namespace
+    total_vectors = len(
+        vectors
     )
 
+    for start in range(
+        0,
+        total_vectors,
+        pinecone_batch_size
+    ):
 
-    print(
-        "SUCCESS: PDF indexed successfully!"
-    )
+        end = min(
+            start + pinecone_batch_size,
+            total_vectors
+        )
+
+        batch = vectors[
+            start:end
+        ]
+
+        index.upsert(
+            vectors=batch,
+            namespace=namespace
+        )
+
+
+        upload_progress = (
+            end / total_vectors
+        )
+
+        progress = (
+            0.75 +
+            upload_progress * 0.20
+        )
+
+        if progress_callback:
+
+            progress_callback(
+                progress,
+                (
+                    f"☁️ Uploading to Pinecone: "
+                    f"{end}/{total_vectors}"
+                )
+            )
 
 
     # --------------------------------------------------
-    # 7. Return statistics
+    # 9. Complete
     # --------------------------------------------------
 
-    return len(documents), len(splits)
+    if progress_callback:
+
+        progress_callback(
+            1.0,
+            (
+                f"✅ {filename} processed "
+                f"successfully"
+            )
+        )
+
+
+    return pages, total_chunks
