@@ -51,10 +51,10 @@ The application uses semantic search powered by Pinecone vector embeddings and t
 ```
 ## 📸 Preview
 ### Home Page
-![Chatbot](images\chat1.jpeg)
+![Chatbot](chat1.jpeg)
 
 ### Chat Conversation
-![Customer Support FAQ Chatbot](images/chat2.jpeg)
+![Customer Support FAQ Chatbot](chat2.jpeg)
 
 ### Key Components
 
