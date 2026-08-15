@@ -1,6 +1,8 @@
 import os
 import hashlib
 
+import streamlit as st
+
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -9,12 +11,15 @@ from pinecone import Pinecone
 
 
 # ==================================================
-# LOAD EMBEDDING MODEL ONCE
+# EMBEDDING MODEL
 # ==================================================
 
-embedding_model = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
+@st.cache_resource
+def get_embedding_model():
+
+    return HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
 
 
 # ==================================================
@@ -28,6 +33,13 @@ def ingest_pdf(
     namespace,
     progress_callback=None
 ):
+
+    # ==================================================
+    # LOAD EMBEDDING MODEL
+    # ==================================================
+
+    embedding_model = get_embedding_model()
+
 
     # ==================================================
     # CONNECT TO PINECONE
@@ -64,7 +76,6 @@ def ingest_pdf(
             "📖 Reading PDF..."
         )
 
-
     loader = PyPDFLoader(
         pdf_path
     )
@@ -84,7 +95,6 @@ def ingest_pdf(
             0.15,
             f"✂️ Splitting {pages} pages..."
         )
-
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,
@@ -106,26 +116,7 @@ def ingest_pdf(
 
 
     # ==================================================
-    # PREPARE TEXT
-    # ==================================================
-
-    texts = [
-        doc.page_content
-        for doc in splits
-    ]
-
-
-    # ==================================================
-    # GET ORIGINAL FILE NAME
-    # ==================================================
-
-    filename = os.path.basename(
-        pdf_path
-    )
-
-
-    # ==================================================
-    # CREATE HASH FROM ACTUAL PDF CONTENT
+    # FILE HASH
     # ==================================================
 
     with open(
@@ -136,6 +127,11 @@ def ingest_pdf(
         file_hash = hashlib.sha256(
             f.read()
         ).hexdigest()[:12]
+
+
+    filename = os.path.basename(
+        pdf_path
+    )
 
 
     # ==================================================
@@ -158,15 +154,13 @@ def ingest_pdf(
             total_chunks
         )
 
+        batch_texts = [
 
-        batch_texts = texts[
-            start:end
+            doc.page_content
+
+            for doc in splits[start:end]
         ]
 
-
-        # ----------------------------------------------
-        # Generate embeddings
-        # ----------------------------------------------
 
         batch_embeddings = (
             embedding_model.embed_documents(
@@ -174,10 +168,6 @@ def ingest_pdf(
             )
         )
 
-
-        # ----------------------------------------------
-        # Create Pinecone vectors
-        # ----------------------------------------------
 
         for local_index, emb in enumerate(
             batch_embeddings
@@ -208,30 +198,26 @@ def ingest_pdf(
             }
 
 
-            vectors.append(
-                {
+            vectors.append({
 
-                    "id":
-                        f"{file_hash}-"
-                        f"chunk-{global_index}",
+                "id":
+                    f"{file_hash}-chunk-{global_index}",
 
-                    "values":
-                        emb,
+                "values":
+                    emb,
 
-                    "metadata":
-                        metadata
-                }
-            )
+                "metadata":
+                    metadata
+            })
 
 
         # ----------------------------------------------
-        # Update progress
+        # PROGRESS
         # ----------------------------------------------
 
         embedding_progress = (
             end / total_chunks
         )
-
 
         progress = (
             0.20 +
@@ -272,7 +258,6 @@ def ingest_pdf(
             total_vectors
         )
 
-
         batch = vectors[
             start:end
         ]
@@ -284,14 +269,9 @@ def ingest_pdf(
         )
 
 
-        # ----------------------------------------------
-        # Update upload progress
-        # ----------------------------------------------
-
         upload_progress = (
             end / total_vectors
         )
-
 
         progress = (
             0.75 +
@@ -319,8 +299,7 @@ def ingest_pdf(
         progress_callback(
             1.0,
             (
-                f"✅ {filename} processed "
-                f"successfully"
+                f"✅ {filename} processed successfully"
             )
         )
 
