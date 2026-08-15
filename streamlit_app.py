@@ -1,12 +1,24 @@
-import streamlit as st
 import os
 import tempfile
 import uuid
+
+import streamlit as st
 
 from dotenv import load_dotenv
 
 from rag_chain import get_rag_chain
 from ingest import ingest_pdf
+
+from database import (
+    create_chat,
+    get_all_chats,
+    get_messages,
+    get_documents,
+    update_chat_title,
+    save_message,
+    save_document,
+    clear_messages
+)
 
 
 # ==================================================
@@ -29,21 +41,88 @@ PINECONE_INDEX = os.getenv(
 # ==================================================
 
 st.set_page_config(
+
     page_title="AI Document Assistant",
+
     page_icon="🤖",
+
     layout="wide"
 )
 
 
 # ==================================================
-# SESSION STATE
+# DATABASE → SESSION STATE
+# ==================================================
+
+def load_chats():
+
+    db_chats = get_all_chats()
+
+    chats = {}
+
+    for chat in db_chats:
+
+        chats[
+            chat["chat_id"]
+        ] = {
+
+            "title":
+                chat["title"],
+
+            "messages":
+                get_messages(
+                    chat["chat_id"]
+                ),
+
+            "namespace":
+                chat["namespace"],
+
+            "files":
+                get_documents(
+                    chat["chat_id"]
+                ),
+
+            "rag_chain":
+                None
+        }
+
+    return chats
+
+
+# ==================================================
+# INITIAL SESSION STATE
 # ==================================================
 
 if "chats" not in st.session_state:
 
+    st.session_state.chats = (
+        load_chats()
+    )
+
+
+# ==================================================
+# CREATE FIRST CHAT
+# ==================================================
+
+if not st.session_state.chats:
+
     chat_id = str(
         uuid.uuid4()
     )
+
+    namespace = (
+        "chat-" + chat_id
+    )
+
+    create_chat(
+
+        chat_id,
+
+        "New Chat",
+
+        namespace
+    )
+
 
     st.session_state.chats = {
 
@@ -56,7 +135,7 @@ if "chats" not in st.session_state:
                 [],
 
             "namespace":
-                "chat-" + chat_id,
+                namespace,
 
             "files":
                 [],
@@ -66,8 +145,24 @@ if "chats" not in st.session_state:
         }
     }
 
+
     st.session_state.current_chat = (
         chat_id
+    )
+
+
+# ==================================================
+# RESTORE CURRENT CHAT
+# ==================================================
+
+elif "current_chat" not in st.session_state:
+
+    st.session_state.current_chat = (
+        next(
+            iter(
+                st.session_state.chats
+            )
+        )
     )
 
 
@@ -79,6 +174,20 @@ def create_new_chat():
 
     chat_id = str(
         uuid.uuid4()
+    )
+
+    namespace = (
+        "chat-" + chat_id
+    )
+
+
+    create_chat(
+
+        chat_id,
+
+        "New Chat",
+
+        namespace
     )
 
 
@@ -93,7 +202,7 @@ def create_new_chat():
             [],
 
         "namespace":
-            "chat-" + chat_id,
+            namespace,
 
         "files":
             [],
@@ -130,7 +239,10 @@ current_chat = (
 
 with st.sidebar:
 
-    st.title("📚 AI Assistant")
+    st.title(
+        "📚 AI Assistant"
+    )
+
 
     st.divider()
 
@@ -140,7 +252,9 @@ with st.sidebar:
     # ==================================================
 
     if st.button(
+
         "➕ New Chat",
+
         use_container_width=True
     ):
 
@@ -165,9 +279,12 @@ with st.sidebar:
         st.session_state.chats.items()
     ):
 
-        title = chat[
-            "title"
-        ]
+        title = chat["title"]
+
+
+        if title == "":
+
+            title = "New Chat"
 
 
         if chat_id == current_chat_id:
@@ -184,8 +301,11 @@ with st.sidebar:
 
 
         if st.button(
+
             button_text,
+
             key=f"chat_{chat_id}",
+
             use_container_width=True
         ):
 
@@ -208,14 +328,10 @@ with st.sidebar:
     )
 
 
-    if current_chat[
-        "files"
-    ]:
+    if current_chat["files"]:
 
         for file_info in (
-            current_chat[
-                "files"
-            ]
+            current_chat["files"]
         ):
 
             st.caption(
@@ -233,17 +349,25 @@ with st.sidebar:
 
 
     # ==================================================
-    # CLEAR CURRENT CHAT
+    # CLEAR CHAT
     # ==================================================
 
     if st.button(
+
         "🗑️ Clear Current Chat",
+
         use_container_width=True
     ):
+
+        clear_messages(
+            current_chat_id
+        )
+
 
         current_chat[
             "messages"
         ] = []
+
 
         st.rerun()
 
@@ -256,7 +380,6 @@ st.title(
     "📚 AI Document Assistant"
 )
 
-
 st.write(
     "Upload one or more PDFs and ask questions about them."
 )
@@ -267,41 +390,36 @@ st.write(
 # ==================================================
 
 uploaded_files = st.file_uploader(
+
     "Upload your PDFs",
+
     type=["pdf"],
+
     accept_multiple_files=True,
+
     key=f"uploader_{current_chat_id}"
 )
 
 
 # ==================================================
-# PROCESS NEW PDFs
+# PROCESS PDFs
 # ==================================================
 
 if uploaded_files:
-
-    # --------------------------------------------------
-    # Identify already processed files
-    # --------------------------------------------------
 
     processed_files = {
 
         (
             file_info["name"],
+
             file_info["size"]
         )
 
-        for file_info in (
-            current_chat[
-                "files"
-            ]
-        )
+        for file_info in current_chat[
+            "files"
+        ]
     }
 
-
-    # --------------------------------------------------
-    # Find new files
-    # --------------------------------------------------
 
     new_files = [
 
@@ -315,10 +433,6 @@ if uploaded_files:
         ) not in processed_files
     ]
 
-
-    # --------------------------------------------------
-    # Process files
-    # --------------------------------------------------
 
     if new_files:
 
@@ -341,11 +455,14 @@ if uploaded_files:
 
 
         for file_number, uploaded_file in enumerate(
+
             new_files,
+
             start=1
         ):
 
             status_text.write(
+
                 f"📄 Processing "
                 f"{file_number}/{total_files}: "
                 f"**{uploaded_file.name}**"
@@ -353,11 +470,13 @@ if uploaded_files:
 
 
             # ==================================================
-            # SAVE TEMPORARY PDF
+            # TEMPORARY FILE
             # ==================================================
 
             with tempfile.NamedTemporaryFile(
+
                 delete=False,
+
                 suffix=".pdf"
             ) as temp_file:
 
@@ -373,7 +492,7 @@ if uploaded_files:
             try:
 
                 # ==================================================
-                # PROGRESS CALLBACK
+                # PROGRESS
                 # ==================================================
 
                 def update_progress(
@@ -381,7 +500,7 @@ if uploaded_files:
                     message
                 ):
 
-                    current_file_progress = (
+                    current_progress = (
 
                         (
                             file_number - 1
@@ -396,24 +515,27 @@ if uploaded_files:
 
 
                     overall_progress.progress(
+
                         min(
-                            current_file_progress,
+                            current_progress,
                             1.0
                         )
                     )
 
 
                     status_text.write(
+
                         f"📄 "
                         f"{file_number}/{total_files} — "
                         f"{uploaded_file.name}"
                         f"<br>{message}",
+
                         unsafe_allow_html=True
                     )
 
 
                 # ==================================================
-                # INGEST PDF
+                # INGEST
                 # ==================================================
 
                 pages, chunks = ingest_pdf(
@@ -435,35 +557,46 @@ if uploaded_files:
 
 
                 # ==================================================
-                # SAVE FILE INFORMATION
+                # SAVE DATABASE
+                # ==================================================
+
+                save_document(
+
+                    current_chat_id,
+
+                    uploaded_file.name,
+
+                    uploaded_file.size,
+
+                    pages,
+
+                    chunks
+                )
+
+
+                # ==================================================
+                # UPDATE SESSION STATE
                 # ==================================================
 
                 current_chat[
                     "files"
-                ].append(
+                ].append({
 
-                    {
+                    "name":
+                        uploaded_file.name,
 
-                        "name":
-                            uploaded_file.name,
+                    "size":
+                        uploaded_file.size,
 
-                        "size":
-                            uploaded_file.size,
+                    "pages":
+                        pages,
 
-                        "pages":
-                            pages,
-
-                        "chunks":
-                            chunks
-                    }
-                )
+                    "chunks":
+                        chunks
+                })
 
 
             finally:
-
-                # ==================================================
-                # DELETE TEMP FILE
-                # ==================================================
 
                 if os.path.exists(
                     temp_path
@@ -524,6 +657,7 @@ for message in current_chat[
 # ==================================================
 
 user_prompt = st.chat_input(
+
     "Ask something about your documents..."
 )
 
@@ -534,9 +668,7 @@ if user_prompt:
     # CHECK DOCUMENTS
     # ==================================================
 
-    if not current_chat[
-        "files"
-    ]:
+    if not current_chat["files"]:
 
         st.warning(
             "Please upload at least one PDF first."
@@ -546,7 +678,7 @@ if user_prompt:
 
 
     # ==================================================
-    # CREATE RAG CHAIN IF REQUIRED
+    # CREATE RAG CHAIN
     # ==================================================
 
     if current_chat[
@@ -575,7 +707,9 @@ if user_prompt:
         "title"
     ] == "New Chat":
 
-        title = user_prompt.strip()
+        title = (
+            user_prompt.strip()
+        )
 
 
         if len(title) > 30:
@@ -591,8 +725,16 @@ if user_prompt:
         ] = title
 
 
+        update_chat_title(
+
+            current_chat_id,
+
+            title
+        )
+
+
     # ==================================================
-    # BUILD PREVIOUS CHAT HISTORY
+    # BUILD CHAT HISTORY
     # ==================================================
 
     chat_history = ""
@@ -605,6 +747,7 @@ if user_prompt:
         chat_history += (
 
             f'{message["role"]}: '
+
             f'{message["content"]}\n'
         )
 
@@ -628,15 +771,23 @@ if user_prompt:
 
     current_chat[
         "messages"
-    ].append(
+    ].append({
 
-        {
-            "role":
-                "user",
+        "role":
+            "user",
 
-            "content":
-                user_prompt
-        }
+        "content":
+            user_prompt
+    })
+
+
+    save_message(
+
+        current_chat_id,
+
+        "user",
+
+        user_prompt
     )
 
 
@@ -671,7 +822,7 @@ if user_prompt:
 
 
         # ==================================================
-        # DISPLAY SOURCES
+        # SOURCES
         # ==================================================
 
         if sources:
@@ -694,13 +845,21 @@ if user_prompt:
 
     current_chat[
         "messages"
-    ].append(
+    ].append({
 
-        {
-            "role":
-                "assistant",
+        "role":
+            "assistant",
 
-            "content":
-                response
-        }
+        "content":
+            response
+    })
+
+
+    save_message(
+
+        current_chat_id,
+
+        "assistant",
+
+        response
     )
